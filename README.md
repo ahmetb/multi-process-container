@@ -6,19 +6,18 @@ However, sometimes you need two services running next to each other.
 This repository is a sample Docker image that uses [s6-overlay] that is [s6]
 optimized for containers as the [init process] as the container’s `ENTRYPOINT`.
 
-Once the container started, it will run `/init`, which will scan
-`/etc/services.d/` directory for sub-directories that define services through
-`run` and `finish` files:
+Once the container started, it will run `/init` as its `ENTRYPOINT`, which will
+scan `/etc/services.d/`for sub-directories defining the services like this:
 
 ```text
 /etc
 └── services.d/
     ├── service1/
-    │   ├── run         # starts a python web server
-    │   └── finish
+    │   ├── run     # starts a python web server
+    │   └── finish  # runs when service1 terminates
     └── service2/
-        ├── run         # starts command "sleep 99999999"
-        └── finish
+        ├── run     # starts command "sleep 99999999"
+        └── finish  # runs when service2 terminates
 ```
 
 - `run` file is a small bash script that starts the service
@@ -26,9 +25,9 @@ Once the container started, it will run `/init`, which will scan
   whether the container should terminate when the service dies, or should `s6`
   restart the process.
 
-### Example `run` script
+### Review: example `run` script
 
-This script runs your service (by replacing the scripting process itself):
+This script starts your service in the foreground (not like a daemon):
 
 ```sh
 #!/usr/bin/with-contenv sh
@@ -44,11 +43,12 @@ If you don't do that and do your usual
 environment variables. (You can also run the container with  `S6_KEEP_ENV=1`
 environment variable to avoid using `with-contenv`.)
 
-The `exec ...` command starts the long-running service process in the
-foreground. We want to use `exec` here because we want to **replace** the
-current shell process executing the `run` script with our service process.
+The `exec ...` command starts the long-running service process in the foreground
+and most importantly, `exec` **replaces the current shell process** so that
+our service is directly managed by `s6-supervise` (without `sh`/`bash` as its
+parent process).
 
-### Example `finish`  script
+### Review: example `finish`  script
 
 This command gets the exit code of the `run` script as `$1` argument. When the
 service terminates, you can do either of these things
@@ -81,8 +81,30 @@ s6-svscan-+-s6-supervise
           `-s6-supervise---sleep
 ```
 
-Learn more at [s6-overlay] repository which has a great user manual. The [s6]
-project page goes into more technical details.
+Similarly, you can send a graceful termination signal `SIGTERM` to the container
+and have both services terminate and their `finish` script runs:
+
+```sh
+docker kill --signal=TERM test
+```
+
+```text
+service1 exited. code=256
+service2 exited. code=256
+[cont-finish.d] executing container finish scripts...
+[cont-finish.d] done.
+[s6-finish] sending all processes the TERM signal.
+[s6-finish] sending all processes the KILL signal and exiting.
+```
+
+## Learn more
+
+Hope you can use this sample to build containers that reliably run multiple
+processes in production. Remember, you should avoid doing this and split your
+processes into multiple containers as much as possible.
+
+You can learn more at [s6-overlay] repository which has a great user manual. The
+[s6] project page goes into more technical details.
 
 [s6-overlay]: https://github.com/just-containers/s6-overlay
 [s6]: https://skarnet.org/software/s6/
